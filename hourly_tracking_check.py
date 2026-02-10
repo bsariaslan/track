@@ -99,6 +99,16 @@ def parse_17track_text(text: str, tracking_number: str, checked_at: str) -> Trac
     if m:
         status = m.group(1)
 
+    blocked_m = re.search(r"(verify you are human|unusual traffic|access denied|temporarily unavailable)", compact, re.I)
+    if blocked_m:
+        return TrackingResult(
+            source="17Track",
+            tracking_number=tracking_number,
+            checked_at_utc=checked_at,
+            error=f"17Track page appears blocked/challenged: {blocked_m.group(1)}",
+            raw_excerpt=compact[:1200],
+        )
+
     est_m = re.search(r"Estimated delivery(?: time)?:?\s*([0-9\-\s]+(?:to|-)\s*[0-9\-\s]+)", compact, re.I)
     if est_m:
         est = est_m.group(1).strip()
@@ -159,7 +169,10 @@ def check_17track(page, tracking_number: str, checked_at: str) -> TrackingResult
     try:
         page.goto(f"https://t.17track.net/en#nums={tracking_number}", wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(10000)
-        return parse_17track_text(page.locator("body").inner_text(), tracking_number, checked_at)
+        result = parse_17track_text(page.locator("body").inner_text(), tracking_number, checked_at)
+        if not result.error and not any([result.status, result.location, result.estimated_delivery, result.last_update]):
+            result.error = "17Track returned no parseable tracking details for this run."
+        return result
     except PlaywrightTimeoutError as exc:
         return TrackingResult(
             source="17Track",
@@ -177,13 +190,21 @@ def check_17track(page, tracking_number: str, checked_at: str) -> TrackingResult
 
 
 def compare_with_previous(previous: dict, current: dict) -> list[str]:
+    def short(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        one_line = normalize_text(str(value))
+        if len(one_line) > 180:
+            return one_line[:177] + "..."
+        return one_line
+
     changes: list[str] = []
     for source in ["Cainiao", "17Track"]:
         p = previous.get(source, {})
         c = current.get(source, {})
         for field in ["status", "location", "estimated_delivery", "last_update", "error"]:
             if p.get(field) != c.get(field):
-                changes.append(f"{source} {field} changed: {p.get(field)} -> {c.get(field)}")
+                changes.append(f"{source} {field} changed: {short(p.get(field))} -> {short(c.get(field))}")
     return changes
 
 
