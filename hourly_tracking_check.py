@@ -127,10 +127,22 @@ def check_cainiao(page, tracking_number: str, checked_at: str) -> TrackingResult
             except Exception:
                 pass
 
-        box = page.locator("textarea").first
-        box.click(timeout=5000)
+        box = page.locator("textarea, input[type='text']").first
+        box.wait_for(state="visible", timeout=10000)
+        box.fill("")
         box.fill(tracking_number)
-        page.get_by_role("button", name=re.compile("Track", re.I)).first.click(timeout=5000)
+
+        track_btn = page.get_by_role("button", name=re.compile("Track", re.I)).first
+        try:
+            track_btn.click(timeout=5000)
+        except Exception:
+            # Cainiao overlay layers can intercept pointer events intermittently.
+            track_btn.click(timeout=5000, force=True)
+
+        try:
+            box.press("Enter", timeout=2000)
+        except Exception:
+            pass
         page.wait_for_timeout(12000)
 
         return parse_cainiao_text(page.locator("body").inner_text(), tracking_number, checked_at)
